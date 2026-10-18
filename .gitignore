@@ -1,0 +1,36 @@
+# ESP-IDF / CMake : fichiers générés
+/build/
+/build_*/
+/managed_components/
+/sdkconfig
+/sdkconfig.old
+# Les sdkconfig.defaults* et sdkconfig.ci.* restent versionnés.
+
+# Python : environnements et caches
+.venv/
+.venv-*/
+venv/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+
+# Distribution / PyInstaller
+/dist/
+*.spec
+*.egg-info/
+
+# Fichiers locaux et temporaires
+.env
+.env.*
+!.env.example
+*.log
+*.tmp
+*.swp
+*~
+.DS_Store
+Thumbs.db
+Desktop.ini
