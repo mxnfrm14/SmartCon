@@ -65,6 +65,26 @@ class TrayPhoneTests(unittest.TestCase):
             self.assertTrue(self.app.save())
         startup.assert_called_once_with(True)
 
+    def test_old_settings_enable_ducking_and_disabled_setting_is_saved(self):
+        self.assertTrue(self.app.windows_ducking.get())
+        self.app.windows_ducking.set(False)
+        self.app.output.set("Mon casque [MME]")
+        with patch("tray_app.startup_enabled", return_value=False), patch("tray_app.save_settings") as save:
+            self.assertTrue(self.app.save())
+        self.assertFalse(save.call_args.args[0]["windows_ducking"])
+        self.assertEqual(save.call_args.args[0]["output"], "Mon casque [MME]")
+
+    def test_audio_warning_survives_regular_status_updates(self):
+        self.app.events.put(("audio", "Atténuation indisponible : test"))
+        self.app.events.put(("status", "Appel en cours"))
+        self.app.poll()
+        self.assertEqual(self.app.audio_status.get(), "Atténuation indisponible : test")
+
+    def test_windows_button_only_opens_communications_settings(self):
+        with patch("tray_app.subprocess.Popen") as launch:
+            self.app.open_communications()
+        launch.assert_called_once_with(["control.exe", "mmsys.cpl,,3"])
+
 
 if __name__ == "__main__":
     unittest.main()

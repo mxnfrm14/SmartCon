@@ -63,6 +63,88 @@ verifier que le port COM est disponible pour le flash. Tester aussi une nouvelle
 session Windows avec puis sans le demarrage automatique. Le mode `--smoke-test`
 ouvre l'icone puis quitte apres une seconde sans ouvrir le pont audio.
 
+## Son séparé dans OBS et Discord
+
+SmartCon joue le son dans son propre processus, sur le casque choisi. Dans
+l'application Windows, « Périphérique Windows par défaut » utilise maintenant
+la sortie Windows WASAPI par défaut, en mode partagé. Une sortie explicitement
+choisie reste inchangée. Le périphérique est résolu au démarrage du pont et reste
+le même pendant les passages média/appel ; arrêter puis redémarrer le pont pour
+prendre en compte un changement de périphérique par défaut.
+
+Pour choisir si le téléphone est entendu dans OBS :
+
+1. Désactiver **Audio du bureau** dans **Paramètres → Audio** : cette capture
+   reprend tous les sons du casque, y compris SmartCon.
+2. Ajouter une **Capture audio d'application** pour chaque application à diffuser.
+3. Ouvrir la fenêtre SmartCon et l'ajouter comme source audio distincte. Utiliser
+   la correspondance par exécutable pour `SmartCon.exe`.
+4. Couper ou activer cette source dans le mélangeur OBS. Le son reste audible
+   dans le casque. Laisser le monitoring OBS de cette source désactivé pour ne
+   pas l'entendre deux fois.
+
+L'image peut rester une capture de l'écran entier : la sélection de l'audio est
+indépendante. Vérifier la capture après avoir masqué SmartCon près de l'horloge ;
+si OBS ne retrouve pas sa fenêtre, la laisser ouverte ou réduite pendant le stream.
+Depuis les sources Python, le processus peut apparaître sous le nom Python :
+utiliser l'exécutable distribué pour identifier SmartCon sans ambiguïté.
+Voir le [guide OBS](https://obsproject.com/kb/application-audio-capture-guide).
+
+Dans Discord, partager l'application souhaitée avec son audio, puis vérifier
+depuis un autre participant que SmartCon n'est pas transmis. Une capture de
+**tout le son système** inclut SmartCon : l'application ne propose pas de bouton
+permettant de l'en exclure universellement. Aucun câble audio virtuel n'est ajouté.
+
+## Atténuation Windows pendant les appels
+
+La case **Atténuation Windows pendant les appels**, activée par défaut, signale
+les appels à Windows. Le bouton **Réglages Windows : Communications** ouvre
+l'onglet où choisir une réduction de 50 %, de 80 %, le silence des autres sons
+ou **Ne rien faire**. SmartCon ne modifie pas ce réglage global. Arrêter le pont
+avant de changer la case, puis le redémarrer ; les préférences sont enregistrées
+avec les autres réglages dans `settings.json` (`windows_ducking`).
+
+La baisse commence dès l'état d'appel transmis par le firmware : sonnerie, appel
+sortant, conversation ou liaison vocale telle que Siri. Elle ne dépend pas du
+niveau sonore : un silence de l'interlocuteur ne la désactive pas. La musique
+A2DP du téléphone ne déclenche pas l'atténuation. Le mode écoute seule reste
+compatible avec cette fonction.
+
+Le son audible reste dans une session média protégée de l'atténuation. Une
+session de communication silencieuse, distincte et temporaire, signale l'appel
+à Windows sur le même périphérique. Elle est libérée à la fin de l'appel,
+à la déconnexion ou après cinq secondes sans état valide. La sortie audible
+n'est pas rouverte pendant ces transitions. Cette séparation évite que Windows
+conserve l'état « communication » sur la session utilisée pour les médias.
+Il s'agit de sessions internes, pas de nouveaux périphériques audio.
+Arrêter ou quitter SmartCon ferme aussi la session de communication. Windows
+gère la restauration ; une autre communication active, par exemple Discord,
+peut maintenir une atténuation après la fin de l'appel SmartCon.
+
+L'atténuation nécessite une sortie **Windows WASAPI**. Les anciennes sorties MME,
+DirectSound ou WDM-KS sont conservées si sélectionnées, avec un message invitant
+à choisir leur variante WASAPI. Si l'ouverture ou l'entretien de la session de
+communication échoue, SmartCon la libère, affiche **Atténuation indisponible** et
+conserve la lecture normale sur la même sortie, sans réessayer jusqu'au prochain
+démarrage du pont. Un échec d'ouverture de la sortie audible arrête le pont.
+
+Les limites sont celles de Windows : des applications peuvent gérer elles-mêmes
+leur réaction aux communications, et les flux ouverts pendant un appel ne sont
+pas nécessairement atténués. Il n'y a pas de curseur ni d'exceptions par
+application dans SmartCon. L'effet sur le son capturé par OBS doit être vérifié
+avec la méthode de capture choisie ; l'exclusion de SmartCon et l'atténuation
+restent deux réglages indépendants.
+Voir le [comportement Windows](https://learn.microsoft.com/en-us/windows/win32/coreaudio/stream-attenuation).
+
+Le lecteur `pc/listen.py` en ligne de commande conserve son comportement précédent.
+Le firmware et le protocole USB ne changent pas. L'adaptateur de catégorie utilise
+un champ privé de sounddevice et les extensions WASAPI de PortAudio, isolés dans
+`windows_audio.py` et vérifiés au lancement ;
+la dépendance est donc fixée à la version 0.5.6.
+
+Résultats de construction, tests effectués et essais manuels restants :
+[validation audio du 10 novembre 2026](VALIDATION_AUDIO.md).
+
 ## Telephones et appairage controle
 
 Mise a jour de stabilite du 18 octobre : les reconnexions attendent que HFP et

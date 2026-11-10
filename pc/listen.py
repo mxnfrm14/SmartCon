@@ -148,13 +148,130 @@ def main():
     run_bridge(args)
 
 
-def run_bridge(args, stop_event=None, on_status=None, commands=None, on_control=None):
+class DesktopOutput:
+    """Keep playback separate from the short-lived call/ducking session."""
+    def __init__(self, sd, device, callback, ducking, notify):
+        from windows_audio import desktop_output_device, is_wasapi_output, category_settings
+        self.sd = sd
+        self.device = desktop_output_device(sd, device)
+        self.callback = callback
+        self.notify = notify
+        self.stream = None
+        self.session = None
+        self.communication = False
+        self.call = False
+        self.control_at = None
+        self.ducking = ducking
+        self.settings = None
+        self.warning = None
+        self.wasapi = is_wasapi_output(sd, self.device)
+        if self.wasapi:
+            self.settings = sd.WasapiSettings(exclusive=False, auto_convert=True)
+            try:
+                self.settings = category_settings(sd, False)
+            except (AttributeError, TypeError, ValueError, RuntimeError) as exc:
+                self.unavailable(str(exc))
+        elif ducking:
+            self.unavailable("choisissez la variante Windows WASAPI de votre sortie")
+
+    def unavailable(self, reason):
+        self.ducking = False
+        self.warning = f"Atténuation indisponible : {reason}"
+        logging.warning(self.warning)
+        self.notify(self.warning)
+
+    def open(self):
+        kwargs = dict(samplerate=48000, channels=2, dtype="int16",
+                      device=self.device, blocksize=960, callback=self.callback)
+        settings = self.settings
+        if settings is not None:
+            kwargs["extra_settings"] = settings
+        info = self.sd.query_devices(self.device)
+        logging.info("Opening output device=%s name=%s api=%s category=%s",
+                     self.device, info["name"],
+                     self.sd.query_hostapis(info["hostapi"])["name"],
+                     "media")
+        stream = self.sd.RawOutputStream(**kwargs)
+        try:
+            if self.wasapi and self.ducking:
+                from windows_audio import protect_playback
+                try:
+                    protect_playback(self.sd, stream)
+                except (OSError, AttributeError) as exc:
+                    self.unavailable(str(exc))
+            stream.start()
+        except BaseException:
+            stream.close()
+            raise
+        self.stream = stream
+        logging.info("Audio output device=%s category=media", self.device)
+
+    def start(self):
+        self.open()
+        if not self.warning:
+            self.notify("Atténuation Windows : en attente d’appel" if self.ducking
+                        else "Atténuation Windows désactivée dans SmartCon")
+
+    def control(self, status, now):
+        # Called only for a validated protocol snapshot, never audio activity.
+        self.control_at = now
+        self.call = bool(status["ready"] and status["hfp"] and status["call"])
+        self.tick(now)
+
+    def tick(self, now):
+        wanted = bool(self.ducking and self.call and self.control_at is not None
+                      and now < self.control_at + 5)
+        changed = wanted != self.communication
+        if not wanted:
+            self.close_communication()
+        else:
+            from windows_audio import CommunicationSession
+            try:
+                if self.session is None:
+                    self.session = CommunicationSession(self.sd, self.device)
+                self.session.pump()
+                self.communication = True
+            except (OSError, AttributeError) as exc:
+                self.close_communication()
+                self.unavailable(str(exc))
+        if changed and not self.warning:
+            self.notify("Atténuation Windows : appel signalé à Windows" if wanted
+                        else "Atténuation Windows : en attente d’appel")
+
+    def close_communication(self):
+        if self.session is not None:
+            self.session.close()
+            self.session = None
+        self.communication = False
+
+    def close(self):
+        self.close_communication()
+        if self.stream is not None:
+            self.stream.close()
+            self.stream = None
+        self.communication = False
+
+
+def run_bridge(args, stop_event=None, on_status=None, commands=None, on_control=None,
+               on_audio_status=None):
+    """Run with Windows COM owned by the audio worker, not the GUI thread."""
+    apartment = contextlib.nullcontext()
+    if getattr(args, "desktop_audio", False):
+        from windows_audio import audio_thread_com
+        apartment = audio_thread_com()
+    with apartment:
+        return _run_bridge(args, stop_event, on_status, commands, on_control, on_audio_status)
+
+
+def _run_bridge(args, stop_event=None, on_status=None, commands=None, on_control=None,
+                on_audio_status=None):
     """Run until stopped; callbacks report the PC link, not Bluetooth pairing."""
     import serial
     import sounddevice as sd
     stop_event = stop_event or threading.Event()
     on_status = on_status or (lambda status: None)
     on_control = on_control or (lambda status: None)
+    on_audio_status = on_audio_status or (lambda status: None)
     from phone_control import command_frame, decode_status
     try:
         decoder = MediaDecoder()
@@ -255,9 +372,17 @@ def run_bridge(args, stop_event=None, on_status=None, commands=None, on_control=
                         with write_lock:
                             port.write(command_frame({"cmd": "cancel"}))
                 stack.callback(close_pairing)
-            stack.enter_context(sd.RawOutputStream(
-                samplerate=48000, channels=2, dtype="int16",
-                device=args.device, blocksize=960, callback=output))
+            desktop_output = None
+            if getattr(args, "desktop_audio", False):
+                desktop_output = DesktopOutput(
+                    sd, args.device, output,
+                    getattr(args, "windows_ducking", True), on_audio_status)
+                stack.callback(desktop_output.close)
+                desktop_output.start()
+            else:
+                stack.enter_context(sd.RawOutputStream(
+                    samplerate=48000, channels=2, dtype="int16",
+                    device=args.device, blocksize=960, callback=output))
             if not args.no_mic:
                 stack.enter_context(sd.RawInputStream(
                     samplerate=48000, channels=input_channels, dtype="int16",
@@ -298,6 +423,8 @@ def run_bridge(args, stop_event=None, on_status=None, commands=None, on_control=
                     if rate == -1:
                         status = decode_status(pcm)
                         if status is not None:
+                            if desktop_output is not None and not stop_event.is_set():
+                                desktop_output.control(status, time.monotonic())
                             on_control(status)
                         continue
                     now = time.monotonic()
@@ -334,6 +461,8 @@ def run_bridge(args, stop_event=None, on_status=None, commands=None, on_control=
                             del pending[:-38400]
                             overruns += 1
                 now = time.monotonic()
+                if desktop_output is not None and not stop_event.is_set():
+                    desktop_output.tick(now)
                 status = ("Appel en cours" if previous_rate else "Lecture média") if now - last_packet_time < 0.5 else "Connecté au pont — en attente audio"
                 if status != reported_status:
                     on_status(status)

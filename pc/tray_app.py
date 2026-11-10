@@ -95,6 +95,8 @@ class Application:
         self.output = tk.StringVar(value="Périphérique Windows par défaut")
         self.microphone = tk.StringVar(value="Périphérique Windows par défaut")
         self.no_mic = tk.BooleanVar(value=self.settings.get("no_mic", False))
+        self.windows_ducking = tk.BooleanVar(value=self.settings.get("windows_ducking", True))
+        self.audio_status = tk.StringVar(value="Atténuation : réglage appliqué au démarrage du pont.")
         self.autostart = tk.BooleanVar(value=startup_enabled())
         self.auto_bridge = tk.BooleanVar(value=self.settings.get("auto_bridge", True))
         root.title("SmartCon")
@@ -116,7 +118,19 @@ class Application:
             control.grid(row=row, column=0, columnspan=2, sticky="w", pady=4)
             self.controls.append(control)
         buttons = ttk.Frame(panel)
-        buttons.grid(row=9, column=0, columnspan=2, pady=(18, 5))
+        audio_panel = ttk.LabelFrame(panel, text="Écoute et diffusion", padding=10)
+        audio_panel.grid(row=9, column=0, columnspan=2, sticky="ew", pady=(10, 0))
+        ducking = ttk.Checkbutton(audio_panel, text="Atténuation Windows pendant les appels",
+                                 variable=self.windows_ducking)
+        ducking.pack(anchor="w")
+        self.controls.append(ducking)
+        ttk.Button(audio_panel, text="Réglages Windows : Communications",
+                   command=self.open_communications).pack(anchor="w", pady=4)
+        ttk.Label(audio_panel, textvariable=self.audio_status, wraplength=600).pack(anchor="w")
+        ttk.Label(audio_panel, text="OBS : capturez le son par application pour choisir de diffuser SmartCon.\n"
+                  "Une capture de tout le son du PC inclut aussi SmartCon.",
+                  foreground="#555555", wraplength=600).pack(anchor="w", pady=(5, 0))
+        buttons.grid(row=10, column=0, columnspan=2, pady=(18, 5))
         self.start_button = ttk.Button(buttons, text="Démarrer", command=self.start)
         self.start_button.pack(side="left", padx=4)
         self.stop_button = ttk.Button(buttons, text="Arrêter", command=self.stop, state="disabled")
@@ -124,9 +138,9 @@ class Application:
         ttk.Button(buttons, text="Enregistrer", command=self.save).pack(side="left", padx=4)
         ttk.Button(buttons, text="Masquer", command=root.withdraw).pack(side="left", padx=4)
         ttk.Button(buttons, text="Quitter", command=self.quit).pack(side="left", padx=4)
-        ttk.Label(panel, text="Fermer cette fenêtre laisse l’application près de l’horloge.\nL’état décrit le lien USB et l’audio reçu, pas l’appairage Bluetooth.", foreground="#555555").grid(row=10, column=0, columnspan=2, sticky="w", pady=(12, 0))
+        ttk.Label(panel, text="Fermer cette fenêtre laisse l’application près de l’horloge.\nL’état décrit le lien USB et l’audio reçu, pas l’appairage Bluetooth.", foreground="#555555").grid(row=11, column=0, columnspan=2, sticky="w", pady=(12, 0))
         phones_panel = ttk.LabelFrame(panel, text="Téléphones autorisés — un seul actif", padding=10)
-        phones_panel.grid(row=11, column=0, columnspan=2, sticky="ew", pady=(12, 0))
+        phones_panel.grid(row=12, column=0, columnspan=2, sticky="ew", pady=(12, 0))
         ttk.Label(phones_panel, textvariable=self.phone_text, wraplength=620).pack(anchor="w")
         self.phones = ttk.Treeview(phones_panel, columns=("name", "address", "state"), show="headings", height=4, selectmode="browse")
         for key, title, width in [("name", "Téléphone", 160), ("address", "Adresse Bluetooth", 150), ("state", "État", 260)]:
@@ -198,7 +212,7 @@ class Application:
             # Refresh the executable path when an enabled app was moved/updated.
             if self.autostart.get() or startup_enabled():
                 set_startup(self.autostart.get())
-            self.settings = dict(port=self.port.get(), output=self.output.get(), microphone=self.microphone.get(), no_mic=self.no_mic.get(), auto_bridge=self.auto_bridge.get())
+            self.settings = dict(port=self.port.get(), output=self.output.get(), microphone=self.microphone.get(), no_mic=self.no_mic.get(), auto_bridge=self.auto_bridge.get(), windows_ducking=self.windows_ducking.get())
             save_settings(self.settings)
             return True
         except Exception as exc:
@@ -212,6 +226,13 @@ class Application:
         color = "#e05353" if value.startswith("Erreur") else "#7c8798" if value == "Arrêté" else "#35b97b"
         self.tray.icon = icon_image(color)
 
+    def open_communications(self):
+        try:
+            # Open the Communications tab only; never write the global policy.
+            subprocess.Popen(["control.exe", "mmsys.cpl,,3"])
+        except OSError as exc:
+            messagebox.showerror("SmartCon", f"Impossible d’ouvrir les réglages Windows : {exc}")
+
     def start(self):
         if self.closing or (self.worker and self.worker.is_alive()):
             return
@@ -220,12 +241,14 @@ class Application:
         if not self.port.get():
             messagebox.showerror("SmartCon", "Choisissez un port COM.")
             return
-        args = SimpleNamespace(port=self.port.get(), baud=921600, device=self.device_maps[0][self.output.get()], input_device=self.device_maps[1][self.microphone.get()], no_mic=self.no_mic.get(), mic_gain=1.0)
+        args = SimpleNamespace(port=self.port.get(), baud=921600, device=self.device_maps[0][self.output.get()], input_device=self.device_maps[1][self.microphone.get()], no_mic=self.no_mic.get(), mic_gain=1.0,
+                               desktop_audio=True, windows_ducking=self.windows_ducking.get())
         self.stop_event = threading.Event()
         self.commands = queue.Queue(maxsize=32)
         self.phone_status = None
         self.phone_status_at = 0.0
         self.set_status("Connexion en cours…")
+        self.audio_status.set("Initialisation de la sortie audio…")
         self.start_button["state"] = "disabled"
         self.stop_button["state"] = "normal"
         for control in self.controls:
@@ -236,7 +259,8 @@ class Application:
             try:
                 run_bridge(args, self.stop_event,
                            lambda value: self.events.put(("status", value)), self.commands,
-                           lambda value: self.events.put(("phones", value)))
+                           lambda value: self.events.put(("phones", value)),
+                           lambda value: self.events.put(("audio", value)))
             except (Exception, SystemExit) as exc:
                 logging.exception("Bridge stopped with an error")
                 error = str(exc)
@@ -278,6 +302,8 @@ class Application:
                 return
             elif action == "status" and not self.stop_event.is_set():
                 self.set_status(value)
+            elif action == "audio" and not self.stop_event.is_set():
+                self.audio_status.set(value)
             elif action == "phones" and not self.stop_event.is_set():
                 previous = self.phone_status or {}
                 if any(previous.get(key) != value.get(key) for key in ("selected", "hfp", "a2dp", "call", "message", "pending")):
@@ -285,6 +311,7 @@ class Application:
                 self.phone_status = value
                 self.phone_status_at = time.monotonic()
             elif action == "done":
+                self.audio_status.set("Atténuation SmartCon arrêtée.")
                 self.set_status(f"Erreur : {value}" if value else "Arrêté")
                 self.start_button["state"] = "normal"
                 self.stop_button["state"] = "disabled"
@@ -400,10 +427,15 @@ def main():
     try:
         if "--smoke-test" in sys.argv:
             from listen import MediaDecoder
+            from windows_audio import category_settings
             MediaDecoder()  # Verify bundled PyAV/FFmpeg can create the SBC decoder.
+            category_settings(sd, False)
+            category_settings(sd, True)
         root = tk.Tk()
         Application(root)
         root.mainloop()
+        if "--smoke-test" in sys.argv:
+            logging.info("Smoke test completed: Tk, tray, SBC decoder, WASAPI category adapter")
     except Exception as exc:
         logging.exception("Application error")
         if "--smoke-test" in sys.argv:
