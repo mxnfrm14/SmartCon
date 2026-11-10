@@ -1,381 +1,95 @@
-> État complet du projet, matériel, architecture, validations et pistes d’évolution :
-> [Dossier de projet](ETAT_DU_PROJET.md).
->
-> Projet SmartCon : pour les appels et medias A2DP iPhone avec le casque USB et son microphone
-> sous Windows, suivre [pc/README.md](pc/README.md). Le firmware actuel utilise HCI
-> et un transport serie binaire bidirectionnel ; la console interactive de cet
-> exemple Espressif est remplacee par la reception du micro.
-
-> SmartCon : l'appairage est maintenant verrouille par defaut. Utiliser le panneau
-> Telephones de l'application Windows pour ouvrir l'appairage pendant 60 secondes,
-> comparer le numero et approuver le telephone. Plusieurs telephones peuvent etre
-> memorises ; un seul est selectionne et autorise a utiliser appels et medias.
-> Mettre a jour le firmware et l'application ensemble ; voir [le guide PC](pc/README.md).
-
-| Supported Targets | ESP32 | ESP32-S31 |
-| ----------------- | ----- | --------- |
+<div align="center">
 
 # SmartCon
 
-This example is to show how to use the APIs of Hands-Free Client Component and the effects of them by providing a set of commands. You can use this example to communicate with a device that implements Hands-Free Audio Gateway (HF-AG) (e.g. a smartphone).
+**Les appels et le son de l’iPhone dans le casque du PC.**
 
-This demo sends back the audio data back to the HFP AG device, so you can hear your own voice when you link this demo with your HFP-AG device.
+Un pont Bluetooth vers USB qui relie l’iPhone à un casque et à un microphone Windows,
+avec une application de bureau pour les appels, les médias et le contrôle des téléphones.
 
-## How to use example
+</div>
 
-### Hardware Required
+## Ce que fait SmartCon
 
-This example is designed to run on commonly available ESP32 and ESP32-S31 development boards, e.g. ESP32-DevKitC and so on. To operate it should be connected to an AG running on a smartphone or on another ESP32 or ESP32-S31 development board loaded with Hands Free Audio Gateway (hfp_ag) example from ESP-IDF.
+- **Appels mains libres** : l’audio HFP passe entre l’iPhone et le casque du PC, micro compris.
+- **Musique et vidéo** : l’audio stéréo A2DP de l’iPhone est envoyé au PC.
+- **Gestion des téléphones** : appairage avec comparaison d’un code, sélection d’un téléphone autorisé, déconnexion et oubli.
+- **Audio Windows** : écoute sur le périphérique choisi, capture SmartCon comme source distincte dans OBS, et atténuation Windows pendant les communications.
+- **Aucun câble audio virtuel** : l’ESP32 transporte l’audio sur USB série ; Windows continue de lire les autres applications normalement.
 
-### Configure the project
+## Comment ça marche
 
-Open the project configuration menu:
-
-```bash
-idf.py menuconfig
+```mermaid
+flowchart LR
+    Phone[ iPhone ] <-->|Bluetooth HFP · appels| ESP[ ESP32 · SmartCon ]
+    Phone -->|Bluetooth A2DP · médias| ESP
+    ESP <-->|USB série · audio et commandes| App[Application Windows]
+    App -->|Lecture| Headset[Casque et haut-parleurs Windows]
+    Mic[Microphone du PC] -->|Pendant les appels| App
+    App -->|Capture par application, au choix| OBS[OBS ou Discord]
 ```
 
-### Special Configurations for HFP
+Le firmware garde les médias SBC compressés sur le lien série. L’application Windows
+les décode puis lit le son à 48 kHz. Le micro du PC n’est envoyé au téléphone que
+pendant un appel. Le firmware et l’application échangent aussi l’état et les
+commandes de gestion des téléphones.
 
-#### Data Path
+## Démarrage rapide
 
-ESP32 HFP supports two types of audio datapath: PCM and HCI. Currently, ESP32-S31 HFP only supports HCI.
+### Utiliser l’application Windows
 
-The default configuration is `PCM`, if you want to use `vHCI` you should configure the data path before building and downloading the binary.
+1. Récupérer l’exécutable `SmartCon.exe` depuis une livraison du projet ou le
+   [compiler](pc/README.md#application-windows-avec-icone-pres-de-lhorloge).
+2. Brancher la carte ESP32 au PC en USB et fermer les autres programmes qui utilisent
+   son port série.
+3. Lancer SmartCon, choisir le port COM, le casque et le microphone, puis démarrer le pont.
+4. Dans **Téléphones**, ouvrir l’appairage, sélectionner SmartCon sur l’iPhone et
+   comparer puis approuver le code affiché.
+5. Choisir SmartCon comme sortie Bluetooth de l’iPhone pour écouter les appels ou les médias.
 
-- `PCM`: To use PCM, audio stream is directed from Bluetooth controller to the specific GPIO pins you set in the demo, and you should link these GPIO pins to a speaker via I2S port. The audio data will not go through the `Bluedroid`. In menuconfig, you should choose PCM in `menuconfig`:
+Le guide [application Windows, OBS, Discord et atténuation](pc/README.md) décrit les
+réglages et les limites de capture. L’application peut rester dans la zone de
+notification ; utiliser **Quitter** pour libérer le port série avant un flash.
 
-    `Component config --> Bluetooth controller --> BR/EDR Sync(SCO/eSCO) default data path --> PCM`
+### Compiler et flasher le firmware
 
-    and also
+Depuis un terminal initialisé avec ESP-IDF 6.1, à la racine du dépôt :
 
-    `Component config --> Bluetooth --> Bluedroid Options --> Hands Free/Handset Profile --> audio(SCO) data path --> PCM`.
-
-- `vHCI`: To use vHCI, audio data stream will be directed from Bluetooth Controller through vHCI and go through the Bluedroid to the Application layer. In menuconfig, you should choose vHCI in `menuconfig`:
-
-    `Component config --> Bluetooth controller --> BR/EDR Sync(SCO/eSCO) default data path --> HCI`
-
-    and also
-
-    `Component config --> Bluetooth --> Bluedroid Options --> Hands Free/Handset Profile --> audio(SCO) data path --> HCI`.
-
-#### PCM Signal Configurations
-
-PCM Signal supports three configurations in menuconfig: PCM Role, PCM Polar and Channel Mode(Stereo/Mono).
-
-- PCM Role: PCM role can be configured as PCM master or PCM slave. The default configuration is `Master`, you can change the PCM role in `menuconfig` path:
-    `Component config --> Bluetooth --> Controller Options --> PCM Signal Configurations --> PCM Signal Configurations: Role, Polar and Channel Mode(Stereo/Mono) --> PCM Role`
-
-- PCM Polar: PCM polarity can be configured as Falling Edge or Rising Edge. The default configuration is `Falling Edge`, you can change the PCM polar in `menuconfig` path:
-    `Component config --> Bluetooth --> Controller Options --> PCM Signal Configurations --> PCM Signal Configurations: Role, Polar and Channel Mode(Stereo/Mono) --> PCM Polar`
-
-- Channel Mode(Stereo/Mono): PCM frame synchronization signal can be configured as Stereo mode or Mono mode, where the Mono mode can be configured in two different forms(Mono mode 1 and Mono mode 2). As is shown in the figure   ![Stereo/Mono](../hfp_ag/image/Channel_Mode_Stereo_Mono.png)
-
-  - Stereo Mode(Dual channel): FSYNC and DOUT signals both change simultaneously on the edge of CLK. The FSYNC signal continues until the end of the current channel-data transmission.
-  - Mono Mode 1(Single channel): FSYNC signal starts to change a CLK clock cycle earlier than the DOUT signal, which means that the FSYNC signal takes effect a clock cycle earlier than the first bit of the current channel-data transmission. The FSYNC signal continues for one extra CLK clock cycle.
-  - Mono Mode 2(Single channel): FSYNC and DOUT signals both change simultaneously on the edge of CLK. The FSYNC signal continues for one extra CLK clock cycle.
-
-- The default configuration is `Stereo Mode`, you can change the PCM Channel mode in `menuconfig` path:
-    `Component config --> Bluetooth --> Controller Options --> PCM Signal Configurations --> PCM Signal Configurations: Role, Polar and Channel Mode(Stereo/Mono) --> Channel Mode(Stereo/Mono)`
-
-### Special Configurations for PBA Client
-
-To use PBA Client function, we need to enable PBA Client in `menuconfig` path: `Component config --> Bluetooth --> Bluedroid Options --> Classic Bluetooth --> Classic BT PBA Client`, this example already enable PBA Client by `sdkconfig.defaults`.
-
-Step to initialize PBA Client connection:
-
-- Register user callback: `esp_pbac_register_callback(bt_app_pbac_cb)`
-- Initialize PBA Client API: `esp_pbac_init()`
-- Connect to peer device ...
-- Call `esp_pbac_connect(peer_addr, supported_features, 0)`, this will initiate service discover and try to connect to PBA Server.
-- After the operation done, whether success or not, we will receive a `ESP_PBAC_CONNECTION_STATE_EVT` event in user callback.
-
-### Codec Choice
-
-Supported targets provide two types of codec for HFP audio data: `CVSD` and `mSBC`.
-
-`CVSD` is the default setting and is also the widely used codec for voice audio. But, `mSBC` is designed to have a better voice quality through `HFP`. To select which one is in use, we provide `Wide Band Speech` item in the `menuconfig` path:
-
-`Component config --> Bluetooth --> Bluedroid Options --> Wide Band Speech`.
-
-Switching on the `Wide Band Speech` means that the preferred codec is `mSBC`, but which one is actually being used also depends on the `Data Path` configuration.
-
-- If you choose `PCM` for datapath, you can only use `CVSD` and hardware is responsible for the codec job. In the meanwhile, you cannot use `mSBC` by switching `Wide Band Speech` on, because the `mSBC` is implemented in the Bluedroid (Bluetooth Host Stack) by software.
-
-- If you choose `vHCI` for datapath with `Wide Band Speech` on, codec job is done in the Bluedroid and mSBC is being used.
-
-- If you choose `vHCI` for datapath with `Wide Band Speech` off, hardware is responsible for the codec job and `CVSD` is in use.
-
-### Build and Flash
-
-Build the project and flash it to the board, then run monitor tool to view serial output:
-
-```
-idf.py -p PORT flash monitor
+```powershell
+idf.py -B build_audio_pc -p COM3 build flash
 ```
 
-(Replace PORT with the name of the serial port to use.)
+Remplacer `COM3` par le port de la carte. Cette commande construit le firmware pour
+la cible ESP32 configurée puis le flashe. Voir le [guide du firmware](main/README.md)
+pour les prérequis, l’architecture et les points d’entrée du code.
 
-(To exit the serial monitor, type ``Ctrl-]``.)
+### Construire l’application Windows
 
-See the [Getting Started Guide](https://docs.espressif.com/projects/esp-idf/en/latest/get-started/index.html) for full steps to configure and use ESP-IDF to build projects.
+Depuis PowerShell à la racine du dépôt :
 
-## Example Output
-
-When you run this example, the explain prints the following at the very beginning:
-
-```
-Type 'help' to get the list of commands.
-Use UP/DOWN arrows to navigate through command history.
-Press TAB when typing command name to auto-complete.
-
- ==================================================
- |       Steps to test hfp_hf                     |
- |                                                |
- |  1. Print 'help' to gain overview of commands  |
- |  2. Setup a service level connection           |
- |  3. Run hfp_hf to test                         |
- |                                                |
- =================================================
-
+```powershell
+powershell -ExecutionPolicy Bypass -File .\pc\build_windows.ps1
 ```
 
-### Service Level Connection and Disconnection
+L’exécutable est produit dans `dist\SmartCon\SmartCon.exe`. Le guide PC donne aussi
+les instructions pour lancer l’application depuis les sources.
 
-You can type `con` to establish a service level connection with AG device and log prints such as:
+## Documentation
 
-```
-connect
-W (79632) BT_APPL: new conn_srvc id:27, app_id:1
-I (79642) BT_HF: APP HFP event: CONNECTION_STATE_EVT
-I (79642) BT_HF: --connection state connected, peer feats 0x0, chld_feats 0x0
-I (79792) BT_HF: APP HFP event: CALL_IND_EVT
-I (79792) BT_HF: --Call indicator NO call in progress
-I (79792) BT_HF: APP HFP event: CALL_SETUP_IND_EVT
-I (79802) BT_HF: --Call setup indicator NONE
-I (79802) BT_HF: APP HFP event: NETWORK_STATE_EVT
-I (79812) BT_HF: --NETWORK STATE available
-I (79812) BT_HF: APP HFP event: SIGNAL_STRENGTH_IND_EVT
-I (79822) BT_HF: -- signal strength: 4
-I (79822) BT_HF: APP HFP event: ROAMING_STATUS_IND_EVT
-I (79832) BT_HF: --ROAMING: inactive
-I (79832) BT_HF: APP HFP event: BATTERY_LEVEL_IND_EVT
-I (79842) BT_HF: --battery level 3
-I (79842) BT_HF: APP HFP event: CALL_HELD_IND_EVT
-I (79852) BT_HF: --Call held indicator NONE held
-I (79852) BT_HF: APP HFP event: CONNECTION_STATE_EVT
-I (79862) BT_HF: --connection state slc_connected, peer feats 0x16e, chld_feats 0x0
-I (79872) BT_HF: APP HFP event: INBAND_RING_TONE_EVT
-I (79872) BT_HF: --inband ring state Provided
-```
+| Sujet | Guide |
+| --- | --- |
+| Application, périphériques, OBS, Discord et communications Windows | [Guide utilisateur PC](pc/README.md) |
+| Build, flash et architecture du code ESP32 | [Guide firmware](main/README.md) |
+| Architecture WASAPI et maintenance du son Windows | [Guide technique audio](pc/WINDOWS_AUDIO.md) |
+| Résultats de validation et essais matériels restants | [Validation audio](pc/VALIDATION_AUDIO.md) |
+| Historique détaillé, décisions et état du projet | [Dossier de projet](ETAT_DU_PROJET.md) |
 
-**Note: Only after Hands-Free Profile(HFP) service is initialized and a service level connection exists between an HF Unit and an AG device, could other commands be available.**
+## État du projet
 
-You can type `dis` to disconnect with the connected AG device, and log prints such as:
+SmartCon est un projet en évolution. Les essais dépendent du téléphone, du casque,
+de la carte ESP32 et de la version de Windows. Consultez le dossier de projet et
+les notes de validation avant de considérer un scénario matériel comme validé.
 
-```
-disconnect
-W (93702) BT_RFCOMM: port_rfc_closed RFCOMM connection in state 3 closed: Closed (res: 19)
-W (93712) BT_APPL: BTA_HF_CLIENT_SCO_SHUTDOWN_ST: Ignoring event 3
-I (93712) BT_HF: APP HFP event: CONNECTION_STATE_EVT
-I (93712) BT_HF: --connection state disconnected, peer feats 0x0, chld_feats 0x0
-```
+## Licence
 
-### Audio Connection and Disconnection
-
-You can type `cona` to establish the audio connection between HF Unit and AG device. Log prints such as:
-
-```
-connect audio
-I (117232) BT_HF: APP HFP event: AUDIO_STATE_EVT
-I (117232) BT_HF: --audio state connecting
-E (117262) BT_BTM: btm_sco_connected, handle 181
-I (117262) BT_HF: APP HFP event: AUDIO_STATE_EVT
-I (117262) BT_HF: --audio state connected
-```
-
-Also, you can type `disa` to close the audio data stream. Log prints such as:
-
-```
-disconnect audio
-I (133262) BT_HF: APP HFP event: AUDIO_STATE_EVT
-I (133262) BT_HF: --audio state disconnected
-```
-#### Scenarios for Audio Connection
-
-- Answer an incoming call
-- Enable voice recognition
-- Dial an outgoing call
-
-#### Scenarios for Audio Disconnection
-
-- Reject an incoming call
-- Disable the voice recognition
-
-#### Choice of Codec
-
-Supported targets support both CVSD and mSBC codec. HF Unit and AG device determine which codec to use by exchanging features during service level connection. The choice of codec also depends on the your configuration in `menuconfig`.
-
-Since CVSD is the default codec in HFP, we just show the scenarios using mSBC:
-
-- If you enable `BT_HFP_WBS_ENABLE` in `menuconfig`, mSBC will be available.
-- If both HF Unit and AG support mSBC and `BT_HFP_WBS_ENABLE` is enabled, the local device chooses mSBC.
-- If you use PCM data path, mSBC is not available.
-
-### Answer or Reject an incoming call
-
-#### Answer an incoming call
-
-You can type `ac` to answer an incoming call and log prints such as:
-
-```
-Answer call
-I (197102) BT_HF: APP HFP event: AT_RESPONSE
-I (197102) BT_HF: --AT response event, code 0, cme 0
-E (197232) BT_BTM: btm_sco_connected, handle 181
-I (197232) BT_HF: APP HFP event: CALL_IND_EVT
-I (197232) BT_HF: --Call indicator call in progress
-I (197232) BT_HF: APP HFP event: AUDIO_STATE_EVT
-I (197242) BT_HF: --audio state connected
-```
-
-#### Reject an incoming call
-
-You can type `rc` to reject an incoming call and log prints such as:
-
-```
-Reject call
-I (210822) BT_HF: APP HFP event: AT_RESPONSE
-I (210822) BT_HF: --AT response event, code 0, cme 0
-I (210842) BT_HF: APP HFP event: AUDIO_STATE_EVT
-I (210842) BT_HF: --audio state disconnected
-I (210902) BT_HF: APP HFP event: CALL_IND_EVT
-I (210902) BT_HF: --Call indicator NO call in progress
-```
-
-#### Dial Number
-
-This example supports three dialing commands:
-
-- `d <num>` Dial the specific number.
-- `rd` Redial the last number.
-- `dm <index>` Dial the specific indexed number in the AG memory.
-
-For example, type `d 186xxxx5549` to make an outgoing call to `186xxxx5549` and log prints such as:
-
-```
-Dial number 186xxxx5549
-E (229702) BT_BTM: btm_sco_connected, handle 181
-I (229712) BT_HF: APP HFP event: CALL_SETUP_IND_EVT
-I (229712) BT_HF: --Call setup indicator OUTGOING_DIALING
-I (229712) BT_HF: APP HFP event: CALL_IND_EVT
-I (229712) BT_HF: --Call indicator call in progress
-I (229722) BT_HF: APP HFP event: AUDIO_STATE_EVT
-I (229722) BT_HF: --audio state connected
-I (229732) BT_HF: APP HFP event: CALL_SETUP_IND_EVT
-I (229732) BT_HF: --Call setup indicator NONE
-```
-
-#### Respond and Hold
-
-You can type `rh <btrh>` to respond or hold the current call. The parameter should be set as follows:
-
-- `<btrh>` : 0 - hold current call, 1 - answer held call, 2 - end held call.
-
-#### Volume Control
-
-You can type `vu <tgt> <vol>` to update volume gain of speaker or microphone. The parameter should be set as follows:
-
-- `<tgt>` : 0 - speaker, 1 - microphone.
-- `<vol>` : Integer among 0 - 15.
-
-For example, type `vu 0 9` to update the volume of speaker and log on AG prints:
-
-```
-I (43684) BT_APP_HF: APP HFP event: VOLUME_CONTROL_EVT
-I (43684) BT_APP_HF: --Volume Target: SPEAKER, Volume 9
-```
-
-And also, `vu 1 9` update the volume gain of microphone and log on AG prints:
-
-```
-I (177254) BT_APP_HF: APP HFP event: VOLUME_CONTROL_EVT
-I (177254) BT_APP_HF: --Volume Target: MICROPHONE, Volume 9
-```
-
-#### Voice Recognition
-
-You can type `vron` to start the voice recognition of AG and type `vroff` to terminate this function. For example, type `vron` and log prints such as:
-
-```
-Start voice recognition
-I (293172) BT_HF: APP HFP event: AT_RESPONSE
-I (293172) BT_HF: --AT response event, code 0, cme 0
-E (293702) BT_BTM: btm_sco_connected, handle 181
-I (293702) BT_HF: APP HFP event: AUDIO_STATE_EVT
-I (293702) BT_HF: --audio state connected
-```
-
-#### Query Current Operator Name
-
-You can type `qop` to query the current operator name and log prints like:
-
-```
-Query operator
-I (339202) BT_HF: APP HFP event: CURRENT_OPERATOR_EVT
-I (339202) BT_HF: --operator name: 中国联通
-I (339202) BT_HF: APP HFP event: AT_RESPONSE
-I (339202) BT_HF: --AT response event, code 0, cme 0
-```
-
-#### Retrieve Subscriber Information
-
-You can type `rs` to retrieve subscriber information and log prints such as:
-
-```
-Retrieve subscriber information
-I (353702) BT_HF: APP HFP event: SUBSCRIBER_INFO_EVT
-I (353702) BT_HF: --subscriber type unknown, number 186xxxx5549
-I (353702) BT_HF: APP HFP event: AT_RESPONSE
-I (353702) BT_HF: --AT response event, code 0, cme 0
-```
-
-#### Query Current Call Status
-
-You can type `qc` to query current call status and log prints like:
-
-```
-Query current call status
-I (354582) BT_HF: APP HFP event: CLCC_EVT
-I (354582) BT_HF: --Current call: idx 1, dir incoming, state active, mpty single, number 186xxxx5549
-I (354582) BT_HF: APP HFP event: AT_RESPONSE
-I (354592) BT_HF: --AT response event, code 0, cme 0
-```
-
-#### Transport DTMF Code
-
-You can type `k <dtmf>` to transport a DTMF code to AG. Log on HF unit side prints like:`send dtmf code: 9` and log on AG side prints such as:
-
-```
-I (196284) BT_APP_HF: APP HFP event: DTMF_RESPONSE_EVT
-I (196284) BT_APP_HF: --DTMF code is: 9.
-```
-
-## Troubleshooting
-
-If you encounter any problems, please check if the following rules are followed:
-
-- You should type the command in the terminal according to the format described in the commands help table.
-- Not all commands in the table are supported by AG device like _Hands Free Audio Gateway (hfp_ag)_ example from ESP-IDF.
-- If you want to use `con` to establish a service level connection with specific AG device, you should add the MAC address of the AG device in `bt_app.c`, for example: `esp_bd_addr_t peer_addr = {0xb4, 0xe6, 0x2d, 0xeb, 0x09, 0x93};`
-- Use `esp_hf_client_register_callback()` and  `esp_hf_client_init();` before establishing a service level connection.
-
-## Example Breakdown
-
-Due to the complexity of HFP, this example has more source files than other bluetooth examples. To show functions of HFP in a simple way, we use the Commands and Effects scheme to illustrate APIs of HFP in ESP-IDF.
-
-- The example will respond to user command through UART console. Please go to `console_uart.c`  for the configuration details.
-- For voice interface, ESP32 has provided PCM input/output signals which can be mapped to GPIO pins. So, please go to `gpio_pcm_config.c` for the configuration details.
-- If you want to update the command table, please refer to `app_hf_msg_set.c`.
-- If you want to update the responses of HF Unit or want to update the log, please refer to `bt_app_hf.c`.
-- Task configuration part is in `bt_app_core.c`.
+Aucune licence de redistribution n’est déclarée dans ce dépôt pour le moment.

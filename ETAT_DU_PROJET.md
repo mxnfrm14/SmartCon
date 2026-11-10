@@ -1,6 +1,6 @@
 # SmartCon — dossier de projet
 
-**État au 18 octobre 2026 · Version documentaire 1.1**  
+**État au 10 novembre 2026 · Version documentaire 1.3**
 **Répertoire de travail :** `C:\esp\phone_bridge`  
 **Objet :** utiliser le casque et le microphone du PC Windows pour les appels de l’iPhone, et écouter sur le PC sa musique et le son de ses vidéos.
 
@@ -8,17 +8,17 @@ Ce document distingue les fonctions implémentées, les essais réellement effec
 
 ## 1. Situation actuelle
 
-Le projet s’appelle **SmartCon**, aussi bien dans la liste Bluetooth de l’iPhone que dans l’application Windows. L’ESP32 reçoit les appels HFP et les médias A2DP ; le PC restitue le son et fournit le microphone par USB-série. L’application autonome est disponible dans **`dist\SmartCon\SmartCon.exe`** et embarque Python et ses dépendances.
+Le projet s’appelle **SmartCon**, aussi bien dans la liste Bluetooth de l’iPhone que dans l’application Windows. L’ESP32 reçoit les appels HFP et les médias A2DP ; le PC restitue le son et fournit le microphone par USB-série. L’application autonome est disponible dans **`dist\SmartCon\SmartCon.exe`** et embarque Python et ses dépendances. Attention : cet exécutable a été produit avant le dernier correctif audio décrit à la section 6.9 ; il doit être reconstruit avant de distribuer cette correction.
 
-Le firmware courant a été **compilé puis flashé sur COM3 le 18 octobre**, avec vérification des données écrites et conservation de l’appairage. Il n’est pas nécessaire de refaire ce flash pour utiliser l’exécutable courant.
+Le firmware courant a été **compilé puis flashé sur COM3 le 18 octobre**, avec vérification des données écrites et conservation de l’appairage. Les évolutions audio Windows de novembre ne changent pas le firmware ; reconstruire l’exécutable PC suffit à les inclure.
 
 Après l’ajout de la gestion des téléphones, deux régressions ont été corrigées : l’échec d’appairage avant affichage du numéro, puis les connexions instables et les médias absents ou disponibles seulement après un appel. Les connexions des profils sont maintenant séquencées, les tentatives en cours suivies, et la sélection du téléphone déjà actif conserve ses liens. Les callbacks audio ne prennent plus le verrou des commandes et des écritures NVS : ils lisent des autorisations atomiques. La fermeture du lien vocal libère explicitement l’état micro.
 
 L’essai direct après le dernier flash a confirmé **HFP et A2DP connectés**, puis une lecture média sans appel préalable : **plus de 2 000 paquets**, **aucune perte série**, **aucune erreur SBC** et **aucun paquet rejeté par l’autorisation**. L’utilisateur a confirmé « Music/video plays normally », puis **« ok it seems to work fine now »**. Le diagnostic utilisait l’écoute seule et a libéré COM3 après l’essai.
 
-Ce résultat valide le rétablissement de l’appairage, de la connexion et des médias sur cette installation. Il ne constitue pas une mesure de stabilité de plusieurs heures. Les appels descendants ont été signalés comme fonctionnels par l’utilisateur ; **le microphone reste à vérifier pendant un appel réel**.
+Ce résultat valide le rétablissement de l’appairage, de la connexion et des médias sur cette installation. Il ne constitue pas une mesure de stabilité de plusieurs heures. Les appels descendants ont été signalés comme fonctionnels par l’utilisateur. **Le 20 octobre 2026, l’utilisateur confirme avoir effectué les tests et que le microphone fonctionne bien.** Le trajet microphone PC vers iPhone est donc validé par son retour.
 
-| Fonction | État au 18 octobre 2026 |
+| Fonction | État au 10 novembre 2026 |
 | --- | --- |
 | Nom Bluetooth et application | **SmartCon** |
 | Compilation et flash ESP32 sur COM3 | Réussis ; appairage conservé ; 19 % de marge dans la partition application |
@@ -28,12 +28,15 @@ Ce résultat valide le rétablissement de l’appairage, de la connexion et des 
 | Sélection, déconnexion et oubli | Implémentés dans l’application ; changement entre deux téléphones distincts encore à tester |
 | Médias A2DP/SBC | Lecture normale confirmée sur le matériel ; aucune perte ni erreur pendant l’essai court |
 | Appels iPhone vers casque PC | Fonctionnement signalé par l’utilisateur ; qualité et conversation prolongée à consigner |
-| Microphone PC vers iPhone | Implémenté ; validation d’intelligibilité toujours à faire |
+| Microphone PC vers iPhone | Fonctionnement validé par les tests de l’utilisateur le 20 octobre 2026 |
 | Musique → appel → musique | Logique de priorité et libération de l’état vocal corrigées ; cycle complet avec micro à formaliser |
 | Application Windows | Icône près de l’horloge, démarrer/arrêter, choix COM/casque/micro, état et fermeture complète |
+| Capture du son SmartCon | Flux de lecture conservé dans le processus de l’application ; source sélectionnable par application dans OBS, sans périphérique virtuel |
+| Atténuation pendant les appels | Session WASAPI Communications temporaire ; notifications Windows DUCK/UNDUCK observées deux fois ; essai téléphonique réel après correctif restant à faire |
+| Restauration des autres applications après appel | Correctif implémenté et validé par notifications WASAPI ; restauration du volume audible pendant un appel réel encore à confirmer |
 | Réglages et démarrage Windows | Implémentés ; option de démarrage automatique et chemin de l’exécutable mémorisés ; nouvelle session Windows à vérifier |
 | Exécutable autonome | `dist\SmartCon\SmartCon.exe` généré ; lancement, création du décodeur SBC et arrêt vérifiés |
-| Tests automatiques | **23 tests réussis** ; un groupe de tests C natifs ignoré faute de compilateur hôte x86-64 |
+| Tests automatiques du pont | Suite PC récente : **47 tests réussis, 1 ignoré**, exécutée avec le test audio Windows activé ; détails et limites en section 12 |
 | Commandes média et volume absolu AVRCP | Non implémentés dans l’application |
 | Latence vidéo, dérive et stabilité longue durée | À mesurer |
 
@@ -43,7 +46,7 @@ Le besoin initial est de conserver le casque USB et son microphone sur le PC tou
 
 L’ESP32 joue le rôle d’accessoire Bluetooth audio auprès de l’iPhone. Le PC assure la restitution sonore, la capture du microphone et le décodage des médias. L’iPhone reste chargé des appels, des applications de lecture et du choix de sortie audio.
 
-Le lecteur envoie directement le son au périphérique Windows sélectionné. Le projet ne crée actuellement **aucun périphérique audio virtuel Windows** : le son reçu n’est donc pas automatiquement une entrée sélectionnable dans OBS, Discord ou une autre application. Une telle intégration constituerait une évolution distincte.
+Le lecteur envoie le son au périphérique Windows sélectionné tout en restant dans le processus SmartCon. OBS peut capturer ce processus comme source audio d’application, indépendamment de l’écoute au casque ; Discord peut partager une application avec son audio. Aucun périphérique virtuel n’est créé. La capture globale du son système inclut encore SmartCon et ne permet pas de l’exclure universellement. Voir [le guide PC](pc/README.md).
 
 La cible utilisée et validée pour la compilation est `esp32`. Des fichiers hérités mentionnent également ESP32-S31 ; leur présence ne prouve pas que cette installation a été testée sur cette autre cible.
 
@@ -135,7 +138,7 @@ Le lecteur utilise les bibliothèques FFmpeg fournies avec la distribution binai
 
 Le projet dérive d’un exemple **Hands-Free Client**. L’exemple contenait une console de commandes et des possibilités de routage audio PCM. Il a été adapté à un pont avec Windows : le port série transporte maintenant de l’audio binaire dans les deux sens et n’est plus une console interactive utilisable pendant l’écoute.
 
-Le nom Bluetooth et le nom de projet sont maintenant `SmartCon`. Les captures historiques conservent les noms observés avant ce renommage. Le README racine contient encore une grande partie de l’exemple d’origine ; pour le fonctionnement actuel, utiliser ce dossier et [le guide PC](pc/README.md).
+Le nom Bluetooth et le nom de projet sont maintenant `SmartCon`. Les captures historiques conservent les noms observés avant ce renommage. Le README racine est la page d’accueil du projet ; la documentation firmware est dans [main/README.md](main/README.md), et le fonctionnement PC est dans [pc/README.md](pc/README.md).
 
 ### 6.2 Réception des appels sur le PC
 
@@ -196,7 +199,21 @@ ESP-IDF pouvait accepter Just Works sans remonter de demande de confirmation à 
 
 Le gestionnaire attend ensuite que HFP et le point SBC soient initialisés, laisse une courte période de reconnexion au téléphone, puis établit les profils en séquence. Il suit les tentatives en cours et temporise les échecs. Une nouvelle activation du téléphone déjà sélectionné ne provoque plus de déconnexion.
 
-Les autorisations des callbacks audio sont publiées par valeurs atomiques pour supprimer toute attente sur le verrou de gestion. L’événement de démarrage média remet à jour le lien et son identifiant autorisés ; la fin du lien vocal efface l’état micro susceptible de retenir la priorité d’appel. L’essai direct et le dernier retour utilisateur confirment le rétablissement des médias ; le microphone et les scénarios prolongés restent à valider.
+Les autorisations des callbacks audio sont publiées par valeurs atomiques pour supprimer toute attente sur le verrou de gestion. L’événement de démarrage média remet à jour le lien et son identifiant autorisés ; la fin du lien vocal efface l’état micro susceptible de retenir la priorité d’appel. L’essai direct et le dernier retour utilisateur confirment le rétablissement des médias ; le microphone a ensuite été validé par les tests de l’utilisateur le 20 octobre 2026. Les scénarios prolongés restent à valider.
+
+### 6.9 Capture séparée et atténuation Windows
+
+L’application de bureau maintient la lecture audible dans son processus et sur la sortie choisie. Cela permet à OBS de capturer SmartCon comme source audio d’application et de couper cette source sans couper le casque. Discord peut capturer séparément l’application partagée. La capture de tout le son système inclut toujours SmartCon ; aucune exclusion universelle ni aucun périphérique audio virtuel n’est fourni.
+
+L’atténuation est une fonction indépendante de la capture. Quand un état de contrôle USB valide indique `ready`, HFP connecté et `call=true`, SmartCon ouvre une session de rendu WASAPI **Communications** silencieuse sur le même périphérique que la lecture. À la fin de l’appel ou après cinq secondes sans état valide, cette session temporaire est arrêtée et libérée. Windows applique son réglage **Communications** ; SmartCon ne change pas les volumes des autres applications ni le réglage global. Les détails techniques sont dans [pc/WINDOWS_AUDIO.md](pc/WINDOWS_AUDIO.md).
+
+La sortie « Périphérique Windows par défaut » est résolue vers la sortie WASAPI par défaut ; une sortie explicitement choisie est conservée. L’atténuation demande une sortie WASAPI. La case de l’application est activée par défaut et les états d’appel incluent sonnerie, appel sortant, conversation et liaison vocale HFP comme Siri. Le choix Windows « Ne rien faire » reste respecté.
+
+Un retour utilisateur a signalé que les autres applications restaient atténuées après le raccrochage, jusqu’à la fermeture complète de SmartCon. La cause reproduite était la réouverture du flux audible dans une session Windows identifiée comme communication. Le correctif conserve désormais le flux média audible ouvert et crée un GUID temporaire distinct pour la session de communication. La session audible de SmartCon est protégée contre l’atténuation de Windows.
+
+La suite Windows opt-in a observé deux cycles natifs `DUCK → UNDUCK` sans nouvelle atténuation après la fin de la session, tout en gardant la lecture média active. Cette vérification établit les notifications Windows, mais ne remplace pas l’essai d’un appel réel avec l’iPhone ni l’écoute du niveau des autres applications. La nouvelle version de l’exécutable n’a pas encore été reconstruite.
+
+Une erreur WASAPI `WdmSyncIoctl` / `Windows WDM-KS` avait aussi été signalée lors du démarrage. La cause était l’ouverture du flux audio sur un worker sans initialisation COM. Le worker du pont initialise maintenant COM en mode MTA avant l’ouverture des flux, puis le libère après leur fermeture. Ce changement concerne l’application Windows ; le lecteur en ligne de commande conserve son ancien chemin audio.
 
 ## 7. Pourquoi conserver le SBC sur la liaison série ?
 
@@ -280,18 +297,22 @@ Les appels utilisent encore une adaptation simple : moyenne de groupes pour réd
 | `sdkconfig` | Configuration effective du firmware courant |
 | `sdkconfig.defaults` | Valeurs initiales du projet |
 | `pc/listen.py` | Parseur série, décodage SBC, écoute Windows et capture micro |
+| `pc/windows_audio.py` | Adaptateur WASAPI, initialisation COM et session de communication silencieuse |
 | `pc/tray_app.py` | Application Windows, icône de notification, réglages et gestion des téléphones |
 | `pc/phone_control.py` | Encodage des commandes et validation des états USB |
 | `pc/requirements.txt` | Dépendances audio Python |
 | `pc/requirements-desktop.txt` et `pc/build_windows.ps1` | Dépendances et compilation de l’exécutable Windows |
 | `pc/test_phone_control.py`, `pc/test_tray_phones.py`, `pc/test_bridge_lifecycle.py` | Tests des commandes, de l’interface et du transport partagé |
 | `pc/test_pairing_adapter.py` | Vérification des signatures SDK et de l’absence d’appels bloquants dans les lecteurs audio |
+| `pc/test_windows_audio.py`, `pc/test_windows_ducking.py` | Cycle de vie WASAPI simulé et observation native des notifications d’atténuation |
 | `pc/test_firmware_policy.py` | Harnais de la politique C ; ignoré ici faute de compilateur hôte |
-| `dist/SmartCon/SmartCon.exe` | Exécutable courant, autonome |
+| `dist/SmartCon/SmartCon.exe` | Exécutable autonome de la livraison précédente ; à reconstruire pour inclure le correctif de restauration décrit en 6.9 |
 | `build_desktop/hardware-stability.log` | Capture du dernier essai média sur le matériel |
 | `pc/test_protocol.py` | Tests des paquets, de la resynchronisation et des conversions voix |
 | `pc/test_media.py` | Test d’intégration du décodage SBC fragmenté |
 | `pc/README.md` | Guide opérationnel du pont actuel |
+| `pc/WINDOWS_AUDIO.md` | Architecture et maintenance audio Windows |
+| `pc/VALIDATION_AUDIO.md` | Résultats audio et essais matériels restant à réaliser |
 | `build_audio_pc/` | Construction et firmware utilisés pour le dernier flash |
 | `build_audio_pc/boot_check.log` | Capture de vérification du démarrage après correction |
 | `build/`, `build_hci/`, `build_serial/` | Autres répertoires de construction présents ; leur nom ne garantit pas leur contenu actuel |
@@ -301,7 +322,7 @@ Les appels utilisent encore une adaptation simple : moyenne de groupes pour réd
 
 ### Utilisation normale avec l’application Windows
 
-Lancer **`dist\SmartCon\SmartCon.exe`**, choisir COM3, le casque et le microphone, puis démarrer le pont. Aucun Python séparé n’est requis pour cet exécutable. Utiliser cette version courante plutôt que les copies intermédiaires de diagnostic.
+Lancer **`dist\SmartCon\SmartCon.exe`**, choisir COM3, le casque et le microphone, puis démarrer le pont. Aucun Python séparé n’est requis. La copie actuellement présente a été construite avant le correctif audio WASAPI de la section 6.9 ; la reconstruire avec la procédure ci-dessous pour essayer ce correctif dans l’application distribuée.
 
 Pour un nouveau téléphone : ouvrir **Appairer (60 s)** dans l’application, choisir SmartCon dans les réglages Bluetooth de l’iPhone, comparer les deux numéros et approuver sur les deux appareils. La carte ferme l’appairage après réussite ou expiration. Pour les téléphones déjà enregistrés, sélectionner une ligne puis Activer ; le téléphone actuellement appairé a été conservé lors du dernier flash.
 
@@ -378,7 +399,7 @@ Commande :
 .\.venv-audio\Scripts\python.exe -m unittest discover -s pc -v
 ```
 
-Le dernier passage a donné **23 tests réussis**, avec PyAV 17.1.0, et **un groupe C natif ignoré** faute de compilateur hôte Windows x86-64. Le compilateur ESP installé permet de vérifier l’adaptateur et le code généré, mais pas d’exécuter ce harnais natif. Les tests exécutés couvrent notamment :
+Le passage le plus récent documenté a donné **47 tests réussis et 1 test ignoré**, avec `SMARTCON_TEST_AUDIO=1`. Le test ignoré concerne le harnais C natif, faute de compilateur hôte Windows x86-64. Le test WASAPI opt-in utilise la sortie réelle et des tampons silencieux ; il n’ouvre ni micro ni port USB. Les tests exécutés couvrent notamment :
 
 - la réception de paquets fragmentés et mêlés à des journaux texte ;
 - la reprise après corruption d’une charge utile ;
@@ -398,6 +419,8 @@ Le dernier passage a donné **23 tests réussis**, avec PyAV 17.1.0, et **un gro
 - les signatures et constantes de l’adaptateur comparées aux en-têtes ESP-IDF réels ;
 - l’absence d’appels de fonction potentiellement bloquants dans le code compilé des lecteurs d’autorisation audio.
 
+Le test `test_windows_ducking` a observé deux cycles de notifications natives `DUCK → UNDUCK`, sans nouvelle atténuation après la fin de la session de communication ; la session de lecture média restait active. Ce test vérifie l’état des sessions Windows, pas le niveau sonore effectivement perçu dans une autre application pendant un appel téléphonique.
+
 Le test SBC synthétique vérifie le chemin logiciel du codec, pas la séparation acoustique gauche/droite du casque. Les tests Tk demandent un environnement graphique utilisable ; les tests de compilation demandent un build ESP-IDF configuré. Examiner les tests ignorés avant d’interpréter le bilan. Le harnais C ignoré ne constitue pas une validation exécutée de toute la politique de connexion.
 
 ### Vérification sur la carte et retour utilisateur
@@ -408,7 +431,7 @@ Le diagnostic direct a observé HFP connecté, puis A2DP connecté, le démarrag
 
 L’utilisateur a confirmé « Music/video plays normally », puis « ok it seems to work fine now ». Ce retour clôt le défaut de média muet et de connexion instable observé pendant cette intervention, dans les limites de l’essai court.
 
-Le diagnostic était en **écoute seule** : l’ouverture du microphone depuis le processus de diagnostic avait échoué avec une erreur MME. Cela ne constitue ni un test réussi ni une conclusion sur le microphone lancé par l’application normale. L’utilisateur avait signalé que les appels semblaient fonctionner, sans avoir testé le micro. Un essai d’appel avec capture réelle reste nécessaire.
+Le diagnostic était en **écoute seule** : l’ouverture du microphone depuis le processus de diagnostic avait échoué avec une erreur MME. Cela ne constitue ni un test réussi ni une conclusion sur le microphone lancé par l’application normale. L’utilisateur avait alors signalé que les appels semblaient fonctionner, sans avoir testé le micro. **Mise à jour du 20 octobre 2026 : l’utilisateur a effectué les tests et confirme que le microphone fonctionne bien.** La durée et le protocole précis de ces essais ne sont pas consignés.
 
 La capture est `build_desktop/hardware-stability.log` et ne contient aucun enregistrement audio. Le diagnostic a été arrêté et la disponibilité de COM3 vérifiée. Le lancement de l’exécutable courant, la création du décodeur SBC embarqué et sa fermeture ont également réussi.
 
@@ -421,6 +444,10 @@ La capture est `build_desktop/hardware-stability.log` et ne contient aucun enreg
 | Verrouillage de l’appairage | Essayer hors fenêtre, refuser une demande, annuler et laisser expirer | Aucun appareil non approuvé autorisé ; délais et refus à vérifier explicitement |
 | Oubli et redémarrage | Oublier un téléphone puis redémarrer la carte | Autorisation supprimée et choix actif conservé conformément aux commandes |
 | Application et démarrage Windows | Enregistrer, quitter, relancer puis ouvrir une nouvelle session Windows | Conservation des périphériques et lancement optionnel depuis le bon exécutable |
+| Capture séparée OBS | Désactiver Audio du bureau, capturer SmartCon et couper sa source | Source SmartCon muette dans OBS tandis que le casque reste audible ; refaire fenêtre masquée |
+| Partage Discord | Partager une application avec son audio et écouter depuis un autre participant | Confirmer que SmartCon n’est pas transmis avec l’application choisie |
+| Atténuation Windows | Régler Communications, faire jouer une autre application, puis tester sonnerie, appel et fin d’appel | Baisse et restauration selon le réglage Windows ; refaire avec « Ne rien faire » |
+| Enregistrement OBS pendant atténuation | Enregistrer d’autres sources audio pendant un appel | Établir quelles sources capturées sont atténuées sur cette configuration OBS |
 | Appel descendant | Appeler la messagerie ou un interlocuteur | Son audible, niveau, coupures et fréquence négociée |
 | Microphone montant | Laisser un message puis le réécouter | Intelligibilité, volume et absence de saturation |
 | Conversation | Appel de 15 à 30 minutes | Stabilité, voix simultanées, écho et retard perçu |
@@ -445,6 +472,9 @@ Pour chaque essai, noter le modèle d’iPhone, iOS, l’application utilisée, 
 | Échec avant affichage d’un numéro | Vérifier le firmware courant et l’ouverture de la fenêtre ; oublier l’ancien lien sur l’iPhone si nécessaire. L’adaptateur de sécurité est limité à ESP-IDF 6.1 |
 | Connexions instables ou média seulement après un appel | Vérifier que le firmware de stabilité du 18 octobre est installé ; conserver le journal de la tentative pour éviter un diagnostic fondé sur le seul état Connecté |
 | Son reçu mais casque silencieux | Relever les indices audio, le périphérique choisi et le volume Windows |
+| Les autres applications restent basses après un appel | Quitter SmartCon pour vérifier la restauration Windows ; reconstruire l’application avec le correctif WASAPI de la section 6.9 et refaire l’essai. Une autre communication active peut conserver l’atténuation |
+| « Atténuation indisponible » | Choisir la variante WASAPI du périphérique de sortie et redémarrer le pont ; vérifier `%APPDATA%\SmartCon\app.log` |
+| OBS ne propose pas SmartCon | Utiliser une capture audio d’application pour `SmartCon.exe`, désactiver Audio du bureau et essayer fenêtre ouverte ou masquée |
 | Microphone silencieux | Vérifier le bouton muet, les permissions Windows et l’indice d’entrée ; parler pendant un appel et observer `micro_niveau` |
 | Voix trop faible ou saturée | Ajuster `--mic-gain`, puis refaire un enregistrement de messagerie pour contrôler le résultat |
 | Paquets invalides ou pertes | Confirmer 921600 bauds aux deux extrémités ; examiner câble, charge système et journaux ; localiser la cause avant de modifier les tampons |
@@ -488,7 +518,7 @@ Déclencher un reset si nécessaire pour voir le démarrage. Quitter le moniteur
 
 **Mémoire et configuration.** La flash physique de 4 Mo est sous-utilisée par l’image configurée en 2 Mo et la partition application de 1 Mo. Ce n’est pas le défaut ayant causé les redémarrages. Toute modification du partitionnement devra être planifiée avec les données persistantes et le mode de mise à jour souhaité.
 
-**Reproductibilité.** Aucun dépôt Git exploitable n’a été détecté dans le répertoire lors de l’intervention. Les sources, la configuration et les dépendances doivent encore faire l’objet d’un historique et d’une procédure de restauration fiables.
+**Reproductibilité.** Le répertoire est un dépôt Git avec un remote `origin` configuré vers `mxnfrm14/SmartCon`. Les modifications courantes doivent encore être enregistrées dans des commits et poussées pour constituer un historique partagé. Une reconstruction depuis une copie propre et une procédure de restauration complète restent à valider.
 
 ## 16. Appairage, données et accès au répertoire
 
@@ -523,7 +553,7 @@ Les pistes ci-dessous sont des propositions à évaluer ; elles ne sont pas déj
 | 3 | Commandes d’appel depuis le PC | Décrocher/raccrocher sans manipuler le téléphone | Scénarios d’appels entrants, sortants et rejets |
 | 1 | Tester la politique avec deux téléphones et des demandes refusées | Valider les restrictions maintenant implémentées | Basculement, oubli, expiration et refus d’appareils non sélectionnés |
 | 3 | Réduire et calibrer la latence média | Améliorer l’usage vidéo | Mesure avant/après, sans hausse des pertes |
-| À étudier | Sortie vers un périphérique audio virtuel Windows | Utiliser le son dans d’autres applications | Besoin réel, routage, boucle audio et installation |
+| À étudier | Exclusion de SmartCon lors d’une capture globale du son système | Exclure la lecture du téléphone même lorsque tout le périphérique est capturé | Évaluer le besoin d’un périphérique virtuel ; la capture par application dans OBS/Discord couvre déjà le cas courant |
 | 2 | Valider le paquet Windows autonome sur une machine propre | Vérifier le déploiement sans Python installé | Installation, périphériques audio et nouvelle session Windows |
 
 ### Autres architectures possibles
@@ -540,7 +570,7 @@ Les pistes ci-dessous sont des propositions à évaluer ; elles ne sont pas déj
 
 ## 18. Prochaine étape proposée
 
-La prochaine vérification est **un appel réel avec le microphone du casque** : laisser un message et le réécouter, ou obtenir le retour d’un interlocuteur sur l’intelligibilité, le niveau et les coupures. Le test média réussi était en écoute seule ; il ne valide pas le trajet montant.
+**Le microphone est validé par les tests de l’utilisateur du 20 octobre 2026.** Pour les changements audio de novembre, reconstruire l’exécutable puis tester un appel réel : vérifier la restauration audible des autres applications après raccrochage, l’absence d’atténuation déclenchée par la musique, et les sources OBS/Discord. Les notifications WASAPI ont été validées séparément, mais ne prouvent pas le niveau sonore pendant un appel réel.
 
 Compléter ensuite la matrice par une conversation prolongée, musique–appel–musique avec micro, pause/reprise, lecture longue, vidéo et reconnexion après veille/USB. Avec un second téléphone, vérifier sélection, refus, expiration et oubli. Consigner les durées, versions et compteurs en complément du retour utilisateur positif.
 
@@ -548,7 +578,11 @@ En parallèle, préparer une sauvegarde versionnée du firmware flashé, de `sdk
 
 ## 19. Références et preuves locales
 
+- [Page d’accueil GitHub](README.md)
+- [Guide firmware](main/README.md)
 - [Guide d’utilisation PC](pc/README.md)
+- [Architecture audio Windows](pc/WINDOWS_AUDIO.md)
+- [Validation audio et essais restants](pc/VALIDATION_AUDIO.md)
 - [Firmware de démarrage et Bluetooth](main/main.c)
 - [Gestion des appels HFP](main/bt_app_hf.c)
 - [Gestion des médias A2DP](main/bt_app_media.c)

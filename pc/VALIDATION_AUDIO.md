@@ -1,5 +1,16 @@
 # Validation audio — 10 novembre 2026
 
+> **État de la livraison :** les résultats historiques ci-dessous concernent
+> l'implémentation qui rouvrait le flux audible pendant les transitions. Le
+> correctif courant garde ce flux média ouvert et utilise une session WASAPI
+> silencieuse avec un GUID temporaire par appel. Le test natif des notifications
+> a validé deux cycles `DUCK → UNDUCK`, mais l'exécutable `dist/SmartCon/SmartCon.exe`
+> cité dans l'historique n'a pas été reconstruit avec ce dernier correctif.
+> Un appel réel avec le téléphone et une mesure de restauration audible restent
+> à effectuer après reconstruction.
+
+Pour le fonctionnement actuel, voir le [guide de maintenance audio Windows](WINDOWS_AUDIO.md).
+
 ## Vérifications effectuées
 
 ### Correctif de restauration du volume après l'appel

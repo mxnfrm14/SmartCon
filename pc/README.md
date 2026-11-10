@@ -137,10 +137,10 @@ restent deux réglages indépendants.
 Voir le [comportement Windows](https://learn.microsoft.com/en-us/windows/win32/coreaudio/stream-attenuation).
 
 Le lecteur `pc/listen.py` en ligne de commande conserve son comportement précédent.
-Le firmware et le protocole USB ne changent pas. L'adaptateur de catégorie utilise
-un champ privé de sounddevice et les extensions WASAPI de PortAudio, isolés dans
-`windows_audio.py` et vérifiés au lancement ;
-la dépendance est donc fixée à la version 0.5.6.
+Le firmware et le protocole USB ne changent pas. Le détail de l'architecture
+WASAPI, des sessions silencieuses et de leur cycle de vie est documenté dans le
+[guide de maintenance audio Windows](WINDOWS_AUDIO.md). `sounddevice` est fixé
+à la version 0.5.6 pour son adaptateur WASAPI.
 
 Résultats de construction, tests effectués et essais manuels restants :
 [validation audio du 10 novembre 2026](VALIDATION_AUDIO.md).
